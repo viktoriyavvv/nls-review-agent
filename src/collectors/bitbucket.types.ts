@@ -2,8 +2,11 @@
  * the Cloud client is a stub with the same shape. */
 
 export interface BitbucketRepoTarget {
-  projectKey: string;
+  /** Data Center project key (required by the DC client; ignored by Cloud). */
+  projectKey?: string;
   repoSlug: string;
+  /** Bitbucket Cloud workspace (Cloud client; falls back to global config). */
+  workspace?: string;
 }
 
 export interface PullRequestSummary {
@@ -39,9 +42,22 @@ export interface PullRequestDetails extends PullRequestSummary {
 
 export interface PullRequestComment {
   id: number | string;
+  /** Parent comment id when this is a reply (thread reconstruction). */
+  parentId?: number | string;
   author: string;
+  /** Plain-text body. (`text` is the canonical field used across the codebase.) */
   text: string;
   createdAt?: number | string;
+  createdOn?: string;
+  updatedOn?: string;
+  deleted?: boolean;
+  /** Present for inline (file-anchored) comments. */
+  inline?: {
+    path?: string;
+    from?: number;
+    to?: number;
+  };
+  links?: Record<string, string>;
   raw?: unknown;
 }
 

@@ -29,12 +29,15 @@ export const BitbucketConfigSchema = z.object({
   baseUrl: z.string().default(''),
   username: z.string().default(''),
   token: z.string().default(''),
+  /** Bitbucket Cloud workspace (e.g. "nls-kz"); unused by the Data Center client. */
+  workspace: z.string().default(''),
 });
 
 export const RepoBitbucketSchema = z.object({
-  projectKey: z.string().min(1),
+  /** Data Center project key. Optional: Cloud addresses repos by workspace, not project. */
+  projectKey: z.string().min(1).optional(),
   repoSlug: z.string().min(1),
-  /** Bitbucket Cloud workspace (unused by the Data Center client). */
+  /** Bitbucket Cloud workspace override (falls back to global bitbucket.workspace). */
   workspace: z.string().optional(),
 });
 

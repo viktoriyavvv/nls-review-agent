@@ -49,3 +49,50 @@ export const OUTPUT_FILES = {
   reviewMd: 'review.md',
   error: 'error.md',
 } as const;
+
+/* ----------------------------- follow-up ----------------------------- */
+
+/** Directory holding all follow-up runs for an issue+repo. */
+export function followupsDir(outputsDir: string, issueKey: string, repoId: string): string {
+  // outputs/<issueKey>/<repoId>/followups
+  return path.join(outputDir(outputsDir, issueKey, repoId), 'followups');
+}
+
+/** One follow-up run, keyed by timestamp so prior runs are never overwritten. */
+export function followupRunDir(
+  outputsDir: string,
+  issueKey: string,
+  repoId: string,
+  timestamp: string,
+): string {
+  // outputs/<issueKey>/<repoId>/followups/<timestamp>
+  return path.join(followupsDir(outputsDir, issueKey, repoId), timestamp);
+}
+
+/** Files written inside a follow-up run directory. */
+export const FOLLOWUP_FILES = {
+  context: 'followup-context.md',
+  raw: 'followup.raw.json',
+  json: 'followup.json',
+  md: 'followup.md',
+  error: 'followup-error.md',
+} as const;
+
+/** Convenience "latest" pointers written at the issue+repo root (overwritten). */
+export const LATEST_FOLLOWUP_FILES = {
+  md: 'latest-followup.md',
+  json: 'latest-followup.json',
+} as const;
+
+/**
+ * Filesystem-safe, sortable timestamp derived from UTC, e.g.
+ * `2026-06-29_16-30-00`. Deterministic for a given Date (UTC-based) so tests are
+ * timezone-independent.
+ */
+export function formatRunTimestamp(d: Date): string {
+  return d
+    .toISOString()
+    .replace(/\..*$/, '') // drop ".000Z"
+    .replace('T', '_')
+    .replace(/:/g, '-');
+}

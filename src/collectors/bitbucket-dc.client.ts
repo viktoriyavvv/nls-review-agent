@@ -36,6 +36,12 @@ export class BitbucketDataCenterClient implements BitbucketClient {
   }
 
   private base(target: BitbucketRepoTarget): string {
+    if (!target.projectKey) {
+      throw new Error(
+        'Bitbucket Data Center requires a projectKey for ' +
+          `${target.repoSlug}. Set repos.<id>.bitbucket.projectKey, or use bitbucket.type: "cloud".`,
+      );
+    }
     return `/rest/api/1.0/projects/${encodeURIComponent(
       target.projectKey,
     )}/repos/${encodeURIComponent(target.repoSlug)}`;

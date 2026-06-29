@@ -4,6 +4,7 @@ import {
   PullRequestComment,
   PullRequestCommit,
   PullRequestDetails,
+  PullRequestDiffStat,
 } from './bitbucket.types';
 
 /** Cap the inline diff so we don't overflow the model context; full diff is on disk. */
@@ -11,9 +12,13 @@ const MAX_DIFF_CHARS = 180_000;
 
 export interface PrContext {
   found: boolean;
+  provider?: string;
+  workspace?: string;
+  repoSlug?: string;
   details?: PullRequestDetails;
   comments?: PullRequestComment[];
   commits?: PullRequestCommit[];
+  diffStat?: PullRequestDiffStat[];
 }
 
 export interface BuildContextParams {
@@ -85,25 +90,31 @@ export function buildContextMarkdown(params: BuildContextParams): string {
 
   /* -------------------------- Bitbucket PR -------------------------- */
   lines.push('## Bitbucket PR', '');
+  if (pr.provider) lines.push(`- Provider: ${pr.provider}`);
+  if (pr.workspace) lines.push(`- Workspace: ${pr.workspace}`);
+  if (pr.repoSlug) lines.push(`- Repo slug: ${pr.repoSlug}`);
   if (pr.found && pr.details) {
     const d = pr.details;
-    lines.push(`- PR title: ${d.title}`);
     lines.push(`- PR id: ${d.id}`);
-    lines.push(`- source branch: ${d.fromRef.branch}`);
-    lines.push(`- target branch: ${d.toRef.branch}`);
-    if (d.fromRef.latestCommit) lines.push(`- source commit: ${d.fromRef.latestCommit}`);
-    if (d.author) lines.push(`- author: ${d.author}`);
-    lines.push(`- state: ${d.state}`);
+    lines.push(`- PR title: ${d.title}`);
+    lines.push(`- PR state: ${d.state}`);
+    lines.push(`- Source branch: ${d.fromRef.branch}`);
+    lines.push(`- Target branch: ${d.toRef.branch}`);
+    if (d.fromRef.latestCommit) lines.push(`- Source commit: ${d.fromRef.latestCommit}`);
+    if (d.author) lines.push(`- Author: ${d.author}`);
     if (d.reviewers.length) {
       const rv = d.reviewers
         .map((r) => `${r.name} [${r.status ?? (r.approved ? 'APPROVED' : 'UNAPPROVED')}]`)
         .join(', ');
-      lines.push(`- reviewers: ${rv}`);
+      lines.push(`- Reviewers: ${rv}`);
     }
     if (d.openTasks != null || d.resolvedTasks != null) {
       lines.push(`- tasks: open=${d.openTasks ?? 0}, resolved=${d.resolvedTasks ?? 0}`);
     }
-    if (d.url) lines.push(`- url: ${d.url}`);
+    if (d.url) lines.push(`- Link: ${d.url}`);
+    lines.push(`- Comments: ${pr.comments?.length ?? 0}`);
+    lines.push(`- Commits: ${pr.commits?.length ?? 0}`);
+    if (pr.diffStat && pr.diffStat.length) lines.push(`- Diffstat: ${pr.diffStat.length} file(s)`);
     if (d.description && d.description.trim()) {
       lines.push('', '### PR description', '', d.description.trim());
     }
@@ -121,7 +132,7 @@ export function buildContextMarkdown(params: BuildContextParams): string {
     }
   } else {
     lines.push('- prFound: false');
-    lines.push('- No Bitbucket PR was found for this issue; review is based on the branch only.');
+    lines.push('', 'PR not found or unavailable. Running branch-only review.');
   }
   lines.push('');
 
