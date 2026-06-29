@@ -1,0 +1,187 @@
+root:
+  reposDir: "./repos"
+  worktreesDir: "./worktrees"
+  outputsDir: "./outputs"
+  locksDir: "./locks"
+
+jira:
+  baseUrl: "${JIRA_BASE_URL}"
+  email: "${JIRA_EMAIL}"
+  apiToken: "${JIRA_API_TOKEN}"
+  # "3" = Jira Cloud (ADF descriptions), "2" = Jira Server/Data Center.
+  apiVersion: "3"
+
+bitbucket:
+  # NOTE: the real Bitbucket is CLOUD (bitbucket.org/nls-kz). The Cloud client is
+  # not implemented yet (stub), and the DC REST API returns 401, so PR lookup
+  # currently degrades to a branch-only review (prFound:false). Switch type to
+  # "cloud" once BitbucketCloudClient is implemented.
+  type: "datacenter"
+  baseUrl: "${BITBUCKET_BASE_URL}"
+  username: "${BITBUCKET_USERNAME}"
+  token: "${BITBUCKET_TOKEN}"
+
+# Claude CLI run mode (mirrors the manual CR command:
+#   claude --dangerously-skip-permissions --effort max --model opus).
+# Defaults if unset: bin=claude, model=opus, effort=max,
+# permissionMode=dangerously-skip-permissions, outputFormat=json.
+claude:
+  bin: "${CLAUDE_BIN}"
+  model: "${CLAUDE_MODEL}"
+  effort: "${CLAUDE_EFFORT}"
+  permissionMode: "${CLAUDE_PERMISSION_MODE}"
+  outputFormat: "${CLAUDE_OUTPUT_FORMAT}"
+  # maxTurns is optional and intentionally NOT set (closest to the manual run).
+  # Uncomment to cap turns: maxTurns: 12
+
+# IMPORTANT: the top-level key under `repos` is the repo id (used for worktree /
+# output / lock paths and for --repo), NOT the Jira prefix. One Jira prefix can
+# map to several repositories — then --repo is required to disambiguate.
+#
+# Bitbucket coords below are PLACEHOLDERS (projectKey = Jira prefix, repoSlug =
+# repo dir name). They only matter once BitbucketCloudClient is implemented;
+# until then PR lookup 401s and the tool does a branch-only review.
+#
+# Repo dirs not yet cloned are marked "# (clone needed)". `sync`/`run` will tell
+# you to clone them when used.
+repos:
+  # ---- SC: Support Center ----
+  frontend-support-center.netcore.kz:
+    jiraPrefixes: ["SC"]
+    path: "./repos/frontend-support-center.netcore.kz"
+    bitbucket: { projectKey: "SC", repoSlug: "frontend-support-center.netcore.kz" }
+
+  # ---- BILL: Billing ----
+  frontend-billing.netcore.kz:
+    jiraPrefixes: ["BILL"]
+    path: "./repos/frontend-billing.netcore.kz"
+    defaultBaseBranch: "origin/main" # this repo uses main, not master
+    bitbucket: { projectKey: "BILL", repoSlug: "frontend-billing.netcore.kz" }
+
+  # ---- CRMMEG: CRM Meganet (2 repos) ----
+  crm.meganet.kz-front-copy: # CRM Meganet (Frontend) (clone needed)
+    jiraPrefixes: ["CRMMEG"]
+    path: "./repos/crm.meganet.kz-front-copy"
+    bitbucket: { projectKey: "CRMMEG", repoSlug: "crm.meganet.kz-front-copy" }
+
+  kz.meganet.crm.mobile: # CRM Mobile (clone needed)
+    jiraPrefixes: ["CRMMEG"]
+    path: "./repos/kz.meganet.crm.mobile"
+    bitbucket: { projectKey: "CRMMEG", repoSlug: "kz.meganet.crm.mobile" }
+
+  # ---- WEBSITE: web properties (11 repos) ----
+  meganet.kz-2023-front: # meganet.kz (clone needed)
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/meganet.kz-2023-front"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "meganet.kz-2023-front" }
+
+  frontend-block.nls.kz: # block.nls.kz (clone needed)
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/frontend-block.nls.kz"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "frontend-block.nls.kz" }
+
+  online.nls.kz: # online.nls.kz (clone needed)
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/online.nls.kz"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "online.nls.kz" }
+
+  start.meganet.kz: # start.meganet.kz (clone needed)
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/start.meganet.kz"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "start.meganet.kz" }
+
+  frontend-nlsshop.kz: # nlsshop.kz
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/frontend-nlsshop.kz"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "frontend-nlsshop.kz" }
+
+  admin.nls.kz-front: # admin.nls.kz (old) (clone needed)
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/admin.nls.kz-front"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "admin.nls.kz-front" }
+
+  frontend-cloud.nls.kz: # cloud.nls.kz (new) (clone needed)
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/frontend-cloud.nls.kz"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "frontend-cloud.nls.kz" }
+
+  admin.nls.kz: # admin.nls.kz (new) (clone needed)
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/admin.nls.kz"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "admin.nls.kz" }
+
+  frontend-nlsoutsource.kz: # nlsit.kz
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/frontend-nlsoutsource.kz"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "frontend-nlsoutsource.kz" }
+
+  nls.kz: # nls.kz
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/nls.kz"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "nls.kz" }
+
+  frontend-nlscloud.kz: # nlscloud.kz
+    jiraPrefixes: ["WEBSITE"]
+    path: "./repos/frontend-nlscloud.kz"
+    bitbucket: { projectKey: "WEBSITE", repoSlug: "frontend-nlscloud.kz" }
+
+  # ---- VPS: video (2 repos) ----
+  frontend_video.nls.kz: # video.nls.kz (Frontend)
+    jiraPrefixes: ["VPS"]
+    path: "./repos/frontend_video.nls.kz"
+    bitbucket: { projectKey: "VPS", repoSlug: "frontend_video.nls.kz" }
+
+  kz.nls.video: # Video NLS (Mobile) (clone needed)
+    jiraPrefixes: ["VPS"]
+    path: "./repos/kz.nls.video"
+    bitbucket: { projectKey: "VPS", repoSlug: "kz.nls.video" }
+
+  # ---- TA: Tech App ----
+  tech-app-2.0: # (clone needed)
+    jiraPrefixes: ["TA"]
+    path: "./repos/tech-app-2.0"
+    bitbucket: { projectKey: "TA", repoSlug: "tech-app-2.0" }
+
+  # ---- KEN: Kenes (2 repos) ----
+  frontend-kenes.nls.kz: # kenes.nls.kz (clone needed)
+    jiraPrefixes: ["KEN"]
+    path: "./repos/frontend-kenes.nls.kz"
+    bitbucket: { projectKey: "KEN", repoSlug: "frontend-kenes.nls.kz" }
+
+  kenes-conference: # live07.kenes.nls.kz (Conference) (clone needed)
+    jiraPrefixes: ["KEN"]
+    path: "./repos/kenes-conference"
+    bitbucket: { projectKey: "KEN", repoSlug: "kenes-conference" }
+
+  # ---- EEML ----
+  surv-flutter-app: # (clone needed)
+    jiraPrefixes: ["EEML"]
+    path: "./repos/surv-flutter-app"
+    bitbucket: { projectKey: "EEML", repoSlug: "surv-flutter-app" }
+
+  # ---- CN ----
+  flutter-cab-nls: # (clone needed)
+    jiraPrefixes: ["CN"]
+    path: "./repos/flutter-cab-nls"
+    bitbucket: { projectKey: "CN", repoSlug: "flutter-cab-nls" }
+
+  # ---- CAB ----
+  flutter-meganet: # (clone needed)
+    jiraPrefixes: ["CAB"]
+    path: "./repos/flutter-meganet"
+    bitbucket: { projectKey: "CAB", repoSlug: "flutter-meganet" }
+
+  # ---- WFH ----
+  wifi-hotspot.netcore.kz: # (clone needed)
+    jiraPrefixes: ["WFH"]
+    path: "./repos/wifi-hotspot.netcore.kz"
+    bitbucket: { projectKey: "WFH", repoSlug: "wifi-hotspot.netcore.kz" }
+
+  # ---- WFH ----
+  frontend-task.netcore.kz: # (clone needed)
+    jiraPrefixes: ["TM"]
+    path: "./repos/frontend-task.netcore.kz"
+    defaultBaseBranch: "origin/main" # this repo uses main, not master
+    bitbucket: { projectKey: "TM", repoSlug: "frontend-task.netcore.kz" }
+
+# NLSMEG: no repository (null in mapping) — intentionally omitted.

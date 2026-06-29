@@ -1,0 +1,103 @@
+/* Shared Bitbucket abstraction. The Data Center client implements this fully;
+ * the Cloud client is a stub with the same shape. */
+
+export interface BitbucketRepoTarget {
+  projectKey: string;
+  repoSlug: string;
+}
+
+export interface PullRequestSummary {
+  id: number;
+  title: string;
+  state: string; // OPEN | MERGED | DECLINED | ...
+  description?: string;
+  fromRef: {
+    branch: string;
+    latestCommit?: string;
+  };
+  toRef: {
+    branch: string;
+  };
+  author?: string;
+  url?: string;
+  createdDate?: number;
+  updatedDate?: number;
+  raw: unknown;
+}
+
+export interface PullRequestReviewer {
+  name: string;
+  approved: boolean;
+  status?: string; // APPROVED | UNAPPROVED | NEEDS_WORK
+}
+
+export interface PullRequestDetails extends PullRequestSummary {
+  reviewers: PullRequestReviewer[];
+  openTasks?: number;
+  resolvedTasks?: number;
+}
+
+export interface PullRequestComment {
+  id: number | string;
+  author: string;
+  text: string;
+  createdAt?: number | string;
+  raw?: unknown;
+}
+
+export interface PullRequestCommit {
+  id: string;
+  message: string;
+  author?: string;
+  authorTimestamp?: number;
+}
+
+export interface PullRequestDiffStat {
+  path: string;
+  type: string; // ADD | MODIFY | DELETE | RENAME | COPY
+}
+
+export interface PullRequestSearchResult {
+  candidates: PullRequestSummary[];
+}
+
+export interface BitbucketClient {
+  findPullRequestByIssueKey(params: BitbucketRepoTarget & {
+    issueKey: string;
+  }): Promise<PullRequestSearchResult>;
+
+  getPullRequest(params: BitbucketRepoTarget & {
+    prId: number;
+  }): Promise<PullRequestDetails>;
+
+  getPullRequestComments(params: BitbucketRepoTarget & {
+    prId: number;
+  }): Promise<PullRequestComment[]>;
+
+  getPullRequestCommits(params: BitbucketRepoTarget & {
+    prId: number;
+  }): Promise<PullRequestCommit[]>;
+
+  getPullRequestDiffStat(params: BitbucketRepoTarget & {
+    prId: number;
+  }): Promise<PullRequestDiffStat[]>;
+}
+
+/* ------------------------- write-side (FUTURE) -------------------------
+ * Intentionally NOT wired into the MVP. These are placeholder interfaces so a
+ * later phase can add commenting / approvals without reshaping the codebase.
+ * No implementation should call these in read-only mode. */
+
+export interface BitbucketWriteClient {
+  /** TODO(phase 2): post a general PR comment. */
+  addPullRequestComment(params: BitbucketRepoTarget & {
+    prId: number;
+    text: string;
+  }): Promise<void>;
+
+  /** TODO(phase 2): approve / request changes. */
+  setReviewStatus(params: BitbucketRepoTarget & {
+    prId: number;
+    status: 'APPROVED' | 'NEEDS_WORK' | 'UNAPPROVED';
+  }): Promise<void>;
+}

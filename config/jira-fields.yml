@@ -1,0 +1,30 @@
+# Jira fields configuration.
+#
+# standardFields: fields always requested for the issue.
+# customFields:   optional project-specific custom fields (acceptance criteria,
+#                 story points, etc). Find ids via GET /rest/api/3/field.
+
+standardFields:
+  - summary
+  - description
+  - status
+  - assignee
+  - reporter
+  - labels
+  - components
+  - fixVersions
+  - issuelinks
+  - attachment
+  - comment
+  - issuetype
+  - priority
+  - created
+  - updated
+
+customFields: []
+# Example:
+# customFields:
+#   - id: "customfield_10001"
+#     label: "Acceptance Criteria"
+#   - id: "customfield_10016"
+#     label: "Story Points"

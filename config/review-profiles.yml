@@ -1,0 +1,26 @@
+# Review profiles map a repo's `reviewProfile` to prompt files and optional limits.
+# A repo references a profile by name via `reviewProfile:` in repos.yml.
+# If a repo has no profile (or the profile is missing) the `default` profile is used.
+
+default: default
+
+profiles:
+  default:
+    prompt: "prompts/frontend-tl-review.md"
+    outputFormat: "prompts/output-format.md"
+
+  frontend-sc:
+    prompt: "prompts/frontend-tl-review.md"
+    outputFormat: "prompts/output-format.md"
+
+  frontend-crm:
+    prompt: "prompts/frontend-tl-review.md"
+    outputFormat: "prompts/output-format.md"
+
+  frontend-website:
+    prompt: "prompts/frontend-tl-review.md"
+    outputFormat: "prompts/output-format.md"
+
+  frontend-website-admin:
+    prompt: "prompts/frontend-tl-review.md"
+    outputFormat: "prompts/output-format.md"

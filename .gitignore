@@ -1,0 +1,20 @@
+node_modules/
+dist/
+.env
+*.log
+
+# Runtime data (keep folders, ignore content)
+repos/*
+!repos/.gitkeep
+worktrees/*
+!worktrees/.gitkeep
+outputs/*
+!outputs/.gitkeep
+locks/*
+!locks/.gitkeep
+!locks/tasks/
+!locks/repos/
+locks/tasks/*
+!locks/tasks/.gitkeep
+locks/repos/*
+!locks/repos/.gitkeep
