@@ -1,0 +1,88 @@
+{
+  "generatedAt": "2026-07-02T10:23:26.881Z",
+  "items": [
+    {
+      "id": "global-review-principles",
+      "type": "global_rule",
+      "status": "approved",
+      "confidence": "high",
+      "title": "Global review principles",
+      "path": "memory/global/review-principles.md",
+      "projects": [],
+      "repos": [],
+      "issueKeys": [],
+      "tags": [
+        "review",
+        "process"
+      ],
+      "createdAt": "2026-07-02T10:16:42.695Z",
+      "updatedAt": "2026-07-02T10:16:42.695Z"
+    },
+    {
+      "id": "fsc-status-key-field-convention",
+      "type": "repo_rule",
+      "status": "proposed",
+      "confidence": "high",
+      "title": "Конвенция ключей статуса «Проблема»: connection_status.key = 'issue', status_internal.key = 'problem'",
+      "path": "memory/proposals/pending/fsc-status-key-field-convention.md",
+      "projects": [
+        "SC"
+      ],
+      "repos": [
+        "frontend-support-center.netcore.kz"
+      ],
+      "issueKeys": [
+        "SC-3563"
+      ],
+      "tags": [
+        "connection_status",
+        "status_internal",
+        "issue",
+        "problem",
+        "ChangeStatusModal",
+        "isShowChangeStatusButton",
+        "statusColorByKey"
+      ],
+      "createdAt": "2026-07-02T10:21:40.913Z",
+      "updatedAt": "2026-07-02T10:21:40.913Z",
+      "source": {
+        "issueKey": "SC-3563",
+        "repoId": "frontend-support-center.netcore.kz",
+        "outputPath": "outputs/SC-3563/frontend-support-center.netcore.kz"
+      }
+    },
+    {
+      "id": "sc-3563-cod-gate-key-regression",
+      "type": "lesson",
+      "status": "proposed",
+      "confidence": "high",
+      "title": "Регрессия SC-3563: выравнивание источника статуса в ЦОД-карточке заодно перевело гейт status_internal на 'issue'",
+      "path": "memory/proposals/pending/sc-3563-cod-gate-key-regression.md",
+      "projects": [
+        "SC"
+      ],
+      "repos": [
+        "frontend-support-center.netcore.kz"
+      ],
+      "issueKeys": [
+        "SC-3563"
+      ],
+      "tags": [
+        "connectionTickets",
+        "ConnectionTicketInfoCardComponent",
+        "isShowChangeStatusButton",
+        "status_internal",
+        "issue",
+        "problem",
+        "ChangeStatusModal"
+      ],
+      "createdAt": "2026-07-02T10:21:40.913Z",
+      "updatedAt": "2026-07-02T10:21:40.913Z",
+      "source": {
+        "issueKey": "SC-3563",
+        "repoId": "frontend-support-center.netcore.kz",
+        "outputPath": "outputs/SC-3563/frontend-support-center.netcore.kz"
+      }
+    }
+  ]
+}

@@ -59,6 +59,16 @@ export const FollowupNewFindingSchema = z.object({
   whyItMatters: z.string().default(''),
 });
 
+/** Set by the CLI (not the model): how the Claude session was handled. */
+export const FollowupClaudeSessionSchema = z.object({
+  resumedClaudeSession: z.boolean().default(false),
+  compactBeforeFollowup: z.boolean().default(false),
+  initialSessionId: z.string().nullable().optional(),
+  usedSessionId: z.string().nullable().optional(),
+  resumeSource: z.string().optional(),
+  resumeError: z.string().optional(),
+});
+
 export const FollowupReviewResultSchema = z.object({
   verdict: FollowupVerdictSchema,
   summary: z.string().default(''),
@@ -69,6 +79,7 @@ export const FollowupReviewResultSchema = z.object({
   newFindings: z.array(FollowupNewFindingSchema).default([]),
   questionsForDeveloper: z.array(z.string()).default([]),
   bitbucketComment: z.string().default(''),
+  claudeSession: FollowupClaudeSessionSchema.optional(),
 });
 
 export type FollowupVerdict = z.infer<typeof FollowupVerdictSchema>;
@@ -77,6 +88,7 @@ export type FollowupCheckedHead = z.infer<typeof FollowupCheckedHeadSchema>;
 export type FollowupResolvedItem = z.infer<typeof FollowupResolvedItemSchema>;
 export type FollowupStillOpenItem = z.infer<typeof FollowupStillOpenItemSchema>;
 export type FollowupNewFinding = z.infer<typeof FollowupNewFindingSchema>;
+export type FollowupClaudeSession = z.infer<typeof FollowupClaudeSessionSchema>;
 export type FollowupReviewResult = z.infer<typeof FollowupReviewResultSchema>;
 
 export interface ParseFollowupOutcome {

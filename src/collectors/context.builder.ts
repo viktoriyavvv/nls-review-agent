@@ -28,10 +28,12 @@ export interface BuildContextParams {
   git: GitMetadata;
   /** Combined review instructions (review prompt + output format). */
   instructions: string;
+  /** Rendered `## Memory Context` block (approved local memory), if any. */
+  memoryContext?: string;
 }
 
 export function buildContextMarkdown(params: BuildContextParams): string {
-  const { issueKey, jira, pr, git, instructions } = params;
+  const { issueKey, jira, pr, git, instructions, memoryContext } = params;
   const lines: string[] = [];
 
   lines.push('# Review context', '');
@@ -171,6 +173,13 @@ export function buildContextMarkdown(params: BuildContextParams): string {
     lines.push('', `> NOTE: diff truncated to ${MAX_DIFF_CHARS} chars. Full diff in diff.patch.`);
   }
   lines.push('');
+
+  /* -------------------------- Memory Context -------------------------- */
+  // Approved local memory, right before the instructions so it stays salient
+  // after the (possibly huge) diff. Absent when the caller runs without memory.
+  if (memoryContext && memoryContext.trim()) {
+    lines.push(memoryContext.trim(), '');
+  }
 
   /* -------------------------- Instructions -------------------------- */
   lines.push('## Instructions', '');

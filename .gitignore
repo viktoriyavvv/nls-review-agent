@@ -3,6 +3,9 @@ dist/
 .env
 *.log
 
+# Saved JQL queries are personal, local user data (created on first use).
+config/jql-queries.json
+
 # Runtime data (keep folders, ignore content)
 repos/*
 !repos/.gitkeep

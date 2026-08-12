@@ -43,15 +43,27 @@ import {
   collectMetadata,
   commitMatches,
   gitFetchAll,
-  gitFetchOrigin,
   prepareWorktree,
   removeWorktree,
 } from './collectors/git.collector';
 import { buildContextMarkdown } from './collectors/context.builder';
 import { buildFollowupContextMarkdown } from './collectors/followup-context.builder';
-import { runClaude } from './review/claude.runner';
+import { ClaudeRunResult, runClaude } from './review/claude.runner';
+import { loadClaudeSession, saveClaudeSession } from './review/claude-session';
+import {
+  resolveResumePlan,
+  shouldAutoSync,
+  shouldFallbackToStateless,
+  withCompactDirective,
+} from './review/run-plan';
 import { ReviewResult, parseReviewResult } from './review/review.schema';
-import { FollowupReviewResult, parseFollowupResult } from './review/followup.schema';
+import {
+  FollowupClaudeSession,
+  FollowupReviewResult,
+  parseFollowupResult,
+} from './review/followup.schema';
+import { run } from './utils/exec';
+import { buildCloneArgs, buildCloneUrl } from './utils/bitbucket-url';
 import {
   PreviousReview,
   PreviousReviewNotFoundError,
@@ -59,6 +71,25 @@ import {
   loadPreviousReview,
   resolvePreviousHead,
 } from './review/previous-review';
+import {
+  filterMemoryItems,
+  findMemoryItemById,
+  initMemory,
+  reindexMemory,
+  scanMemory,
+  searchMemoryItems,
+} from './memory/store';
+import { buildMemoryContext } from './memory/retrieval';
+import { approveProposal, rejectProposal, saveProposalsToPending } from './memory/proposals';
+import { parseMemoryProposalResult } from './memory/proposal.schema';
+import {
+  BugfixDiffInfo,
+  ExistingMemoryRef,
+  RelatedReviewRef,
+  buildBugfixLearningPrompt,
+  buildMemoryProposalPrompt,
+} from './memory/propose';
+import { MemoryError, MemoryIndexItem } from './memory/types';
 import {
   RenderContext,
   renderErrorMarkdown,
@@ -118,6 +149,41 @@ function firstLine(text: string): string {
   return (text ?? '').split('\n')[0].trim();
 }
 
+async function readJsonMaybe<T = Record<string, unknown>>(file: string): Promise<T | null> {
+  try {
+    return JSON.parse(await readText(file)) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function readTextMaybe(file: string): Promise<string | null> {
+  try {
+    return await readText(file);
+  } catch {
+    return null;
+  }
+}
+
+/** Streams a Claude output line to the CLI's stdout so the GUI can show it live. */
+function onClaudeEvent(line: string): void {
+  const t = line.trimEnd();
+  if (t) console.log(`[claude] ${t}`);
+}
+
+/** Bitbucket clone URL for a repo (never contains a token). */
+function cloneUrlForRepo(config: AppConfig, repo: ResolvedRepo, useUsername = true): string {
+  return buildCloneUrl({
+    type: config.bitbucket.type,
+    repoSlug: repo.bitbucket.repoSlug,
+    workspace: repo.bitbucket.workspace || config.bitbucket.workspace || undefined,
+    projectKey: repo.bitbucket.projectKey,
+    baseUrl: config.bitbucket.baseUrl,
+    username: config.bitbucket.username,
+    useUsername,
+  });
+}
+
 function parseDurationToMs(input: string): number {
   const m = /^(\d+)\s*([dhm])$/.exec(input.trim());
   if (!m) {
@@ -170,6 +236,24 @@ function stopReview(
     questionsForDeveloper: [],
     bitbucketComment: '',
   };
+}
+
+/**
+ * git fetch --all --prune for a repo under its repo lock. Runs before every
+ * review/follow-up so the change is checked against fresh remote state. Skipped
+ * when the caller passes --no-sync.
+ */
+async function autoSyncRepo(config: AppConfig, repo: ResolvedRepo, enabled: boolean): Promise<void> {
+  if (!enabled) {
+    logger.warn('Auto-sync skipped (--no-sync); using local remote-tracking state.');
+    return;
+  }
+  logger.stage('syncing repo');
+  logger.step(`[sync] git fetch --all --prune (${repo.id})`);
+  await withLock(repoLockPath(config.root.locksDir, repo.id), () => gitFetchAll(repo.absPath), {
+    label: `repo:${repo.id}`,
+  });
+  logger.success(`[sync] ${repo.id} synced`);
 }
 
 /* ======================================================================== */
@@ -314,6 +398,8 @@ async function cmdSync(options: { repo?: string }): Promise<void> {
 interface RunOptions {
   repo?: string;
   allowUnmapped?: boolean;
+  /** commander --no-sync sets this false; auto-sync runs otherwise. */
+  sync?: boolean;
 }
 
 async function cmdRun(issueKeyRaw: string, options: RunOptions): Promise<void> {
@@ -328,6 +414,14 @@ async function cmdRun(issueKeyRaw: string, options: RunOptions): Promise<void> {
   });
   logger.info(`Issue ${issueKey} -> repo ${repo.id}`);
 
+  // Fail fast (before Jira/Bitbucket) if the repo has not been cloned yet.
+  if (!(await pathExists(repo.absPath))) {
+    throw new Error(
+      `Repo "${repo.id}" not found at ${repo.absPath}.\n` +
+        `Clone it first (GUI: Repos → Clone, or CLI: nls-review clone ${repo.id}).`,
+    );
+  }
+
   validateRunCredentials(config);
 
   // Output paths.
@@ -340,7 +434,11 @@ async function cmdRun(issueKeyRaw: string, options: RunOptions): Promise<void> {
   const lock = await acquireTaskLock(lockPath, `${issueKey}__${repo.id}`);
 
   try {
+    /* ---- B. auto-sync (git fetch --all --prune) unless --no-sync ---- */
+    await autoSyncRepo(config, repo, shouldAutoSync(options));
+
     /* ---- C. Jira ---- */
+    logger.stage('fetching Jira');
     logger.step('Fetching Jira issue...');
     const jiraClient = new JiraClient(config.jira);
     const rawIssue = await jiraClient.getIssue(issueKey, config.jiraFields);
@@ -366,6 +464,7 @@ async function cmdRun(issueKeyRaw: string, options: RunOptions): Promise<void> {
       config.bitbucket.type === 'cloud'
         ? `${workspace ?? '(no workspace)'}/${target.repoSlug}`
         : `${repo.bitbucket.projectKey ?? '?'}/${target.repoSlug}`;
+    logger.stage('fetching Bitbucket PR');
     logger.step(`Searching Bitbucket PR (${provider}) in ${locator}...`);
     const bb = createBitbucketClient(config.bitbucket);
 
@@ -445,23 +544,14 @@ async function cmdRun(issueKeyRaw: string, options: RunOptions): Promise<void> {
       prFound && details?.toRef.branch ? `origin/${details.toRef.branch}` : repo.defaultBaseBranch;
     const sourceCommit = details?.fromRef.latestCommit || chosen?.fromRef.latestCommit;
 
-    if (!(await pathExists(repo.absPath))) {
-      throw new Error(
-        `Repo "${repo.id}" not found at ${repo.absPath}. Clone it first, then run "nls-review sync --repo ${repo.id}".`,
-      );
-    }
-
-    logger.step(`git fetch origin (${repo.id})...`);
-    await withLock(
-      repoLockPath(config.root.locksDir, repo.id),
-      () => gitFetchOrigin(repo.absPath),
-      { label: `repo:${repo.id}` },
-    );
-
+    // origin was already fetched by auto-sync above (or deliberately skipped
+    // with --no-sync); go straight to worktree prep.
+    logger.stage('preparing worktree');
     const wtPath = worktreePath(config.root.worktreesDir, repo.id, issueKey);
     await prepareWorktree({ repoPath: repo.absPath, worktreePath: wtPath, ref });
 
     /* ---- F. git metadata ---- */
+    logger.stage('collecting diff');
     logger.step('Collecting git metadata + diff...');
     const git = await collectMetadata({
       repoId: repo.id,
@@ -511,7 +601,29 @@ async function cmdRun(issueKeyRaw: string, options: RunOptions): Promise<void> {
       return;
     }
 
+    /* ---- G2. memory retrieval (approved local memory only) ---- */
+    logger.stage('collecting memory');
+    const memory = await buildMemoryContext(config, {
+      issueKey,
+      projectKey: parseIssueKey(issueKey).prefix,
+      repoId: repo.id,
+      diffText: git.diff,
+      changedFiles: git.changedFiles,
+    });
+    await writeText(out(OUTPUT_FILES.memoryContext), memory.markdown);
+    await writeJson(out(OUTPUT_FILES.memoryUsed), {
+      issueKey,
+      repoId: repo.id,
+      items: memory.used,
+    });
+    if (memory.used.length) {
+      logger.success(`Memory: ${memory.used.length} approved item(s) attached to the review context.`);
+    } else {
+      logger.info('Memory: no approved memory items found for this issue/repo.');
+    }
+
     /* ---- H. context.md ---- */
+    logger.stage('building context');
     const profile = resolveProfile(config, repo);
     const instructions = await loadInstructions(config.projectRoot, profile);
     const context = buildContextMarkdown({
@@ -520,10 +632,12 @@ async function cmdRun(issueKeyRaw: string, options: RunOptions): Promise<void> {
       pr: { found: prFound, provider, workspace, repoSlug: target.repoSlug, details, comments, commits, diffStat },
       git,
       instructions,
+      memoryContext: memory.markdown,
     });
     await writeText(out(OUTPUT_FILES.context), context);
 
     /* ---- I. Claude ---- */
+    logger.stage('running Claude');
     const claudeCfg = config.claude;
     // profile.maxTurns (if a profile sets it) overrides the global optional turns.
     const maxTurns = profile.maxTurns ?? claudeCfg.maxTurns;
@@ -540,6 +654,7 @@ async function cmdRun(issueKeyRaw: string, options: RunOptions): Promise<void> {
       outputFormat: claudeCfg.outputFormat,
       maxTurns,
       cwd: wtPath,
+      onEvent: onClaudeEvent,
     });
     await writeText(
       out(OUTPUT_FILES.reviewRaw),
@@ -550,7 +665,27 @@ async function cmdRun(issueKeyRaw: string, options: RunOptions): Promise<void> {
       logger.warn(`Claude CLI exited with code ${claude.exitCode}.`);
     }
 
+    // Persist the Claude session id so a later follow-up can --resume it.
+    if (claude.sessionId) {
+      await saveClaudeSession({
+        outputsDir: config.root.outputsDir,
+        issueKey,
+        repoId: repo.id,
+        sessionId: claude.sessionId,
+        head: git.head,
+        source: OUTPUT_FILES.reviewRaw,
+        nowIso: new Date().toISOString(),
+      });
+      logger.info(`Saved Claude session id (${claude.sessionId.slice(0, 8)}…) for follow-up resume.`);
+    } else {
+      logger.warn(
+        'Claude session id not found in output; follow-up resume will need --resume-session. ' +
+          '(Tip: set CLAUDE_OUTPUT_FORMAT=stream-json for a reliable session id.)',
+      );
+    }
+
     /* ---- J/K. normalize + markdown ---- */
+    logger.stage('writing outputs');
     if (!claude.resultText.trim()) {
       const reason = `Claude CLI produced no usable output (exit ${claude.exitCode}).`;
       await writeText(out(OUTPUT_FILES.error), renderErrorMarkdown(issueKey, reason, claude.stderr));
@@ -578,6 +713,7 @@ async function cmdRun(issueKeyRaw: string, options: RunOptions): Promise<void> {
             ? 'PR source commit matches local HEAD'
             : 'No PR found (branch-only review)',
         },
+        claudeSessionId: claude.sessionId ?? undefined,
       };
       await writeJson(out(OUTPUT_FILES.reviewJson), result);
       await writeText(out(OUTPUT_FILES.reviewMd), renderReviewMarkdown(issueKey, result, renderCtx));
@@ -668,6 +804,12 @@ interface FollowupOptions {
   allowUnmapped?: boolean;
   previous?: string;
   fromHead?: string;
+  /** commander --no-sync sets this false. */
+  sync?: boolean;
+  /** commander --no-resume sets this false; default resumes the saved session. */
+  resume?: boolean;
+  /** --resume-session <id> overrides the saved session id. */
+  resumeSession?: string;
 }
 
 const DEFAULT_FOLLOWUP_PROMPT = `Ты frontend TL follow-up review agent.
@@ -697,7 +839,30 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
   });
   logger.info(`Follow-up ${issueKey} -> repo ${repo.id}`);
 
+  if (!(await pathExists(repo.absPath))) {
+    throw new Error(
+      `Repo "${repo.id}" not found at ${repo.absPath}.\n` +
+        `Clone it first (GUI: Repos → Clone, or CLI: nls-review clone ${repo.id}).`,
+    );
+  }
+
   validateRunCredentials(config);
+
+  // Decide Claude session resume: saved id (default) vs --resume-session vs --no-resume.
+  const savedSession = await loadClaudeSession(config.root.outputsDir, issueKey, repo.id);
+  const resumePlan = resolveResumePlan({
+    resume: options.resume,
+    resumeSession: options.resumeSession,
+    savedSessionId: savedSession?.initialReviewSessionId ?? null,
+  });
+  if (resumePlan.enabled) {
+    logger.info(
+      `Claude resume: ON — session ${resumePlan.sessionId?.slice(0, 8)}… (${resumePlan.source}); ` +
+        `/compact runs before the follow-up.`,
+    );
+  } else {
+    logger.info(`Claude resume: OFF (${resumePlan.reason ?? 'stateless'}).`);
+  }
 
   // Previous review: --previous path, else outputs/<issue>/<repo>/review.json|md.
   const previous = await loadPreviousReview({
@@ -748,7 +913,11 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
     outputFile(config.root.outputsDir, issueKey, repo.id, name);
 
   try {
+    /* ---- auto-sync (git fetch --all --prune) unless --no-sync ---- */
+    await autoSyncRepo(config, repo, shouldAutoSync(options));
+
     /* ---- Jira ---- */
+    logger.stage('fetching Jira');
     logger.step('Fetching Jira issue...');
     const jiraClient = new JiraClient(config.jira);
     const rawIssue = await jiraClient.getIssue(issueKey, config.jiraFields);
@@ -771,6 +940,7 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
       config.bitbucket.type === 'cloud'
         ? `${workspace ?? '(no workspace)'}/${target.repoSlug}`
         : `${repo.bitbucket.projectKey ?? '?'}/${target.repoSlug}`;
+    logger.stage('fetching Bitbucket PR');
     logger.step(`Searching Bitbucket PR (${provider}) in ${locator}...`);
     const bb = createBitbucketClient(config.bitbucket);
 
@@ -824,21 +994,13 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
     const sourceCommit = details?.fromRef.latestCommit || chosen?.fromRef.latestCommit;
     const prId = details?.id ?? chosen?.id;
 
-    if (!(await pathExists(repo.absPath))) {
-      throw new Error(
-        `Repo "${repo.id}" not found at ${repo.absPath}. Clone it first, then run "nls-review sync --repo ${repo.id}".`,
-      );
-    }
-
-    logger.step(`git fetch origin (${repo.id})...`);
-    await withLock(repoLockPath(config.root.locksDir, repo.id), () => gitFetchOrigin(repo.absPath), {
-      label: `repo:${repo.id}`,
-    });
-
+    // origin already fetched by auto-sync (or skipped with --no-sync).
+    logger.stage('preparing worktree');
     const wtPath = worktreePath(config.root.worktreesDir, repo.id, issueKey);
     await prepareWorktree({ repoPath: repo.absPath, worktreePath: wtPath, ref });
 
     /* ---- git metadata + full diff ---- */
+    logger.stage('collecting diff');
     logger.step('Collecting git metadata + diff...');
     const git = await collectMetadata({
       repoId: repo.id,
@@ -853,7 +1015,11 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
     );
 
     const headInfo = { repoId: repo.id, branch, previousHead, currentHead: git.head };
-    const writeFollowupStop = async (reason: string, details2?: string): Promise<void> => {
+    const writeFollowupStop = async (
+      reason: string,
+      details2?: string,
+      claudeSession?: FollowupClaudeSession,
+    ): Promise<void> => {
       const stop: FollowupReviewResult = {
         verdict: 'STOP',
         summary: reason,
@@ -871,6 +1037,7 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
         newFindings: [],
         questionsForDeveloper: [],
         bitbucketComment: '',
+        claudeSession,
       };
       const md = renderFollowupStopMarkdown(issueKey, reason, headInfo, details2);
       await writeText(fout(FOLLOWUP_FILES.error), renderErrorMarkdown(issueKey, 'Follow-up STOP', reason));
@@ -918,6 +1085,28 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
         `Delta since ${previousHead?.slice(0, 12) ?? '—'}: ${delta.changedFiles.length} file(s) changed.`,
       );
 
+    /* ---- memory retrieval (approved local memory only) ---- */
+    logger.stage('collecting memory');
+    const memory = await buildMemoryContext(config, {
+      issueKey,
+      projectKey: parseIssueKey(issueKey).prefix,
+      repoId: repo.id,
+      // Match tags against both the delta and the full change.
+      diffText: `${delta.diff}\n${git.diff}`,
+      changedFiles: [...new Set([...delta.changedFiles, ...git.changedFiles])],
+    });
+    await writeText(fout(FOLLOWUP_FILES.memoryContext), memory.markdown);
+    await writeJson(fout(FOLLOWUP_FILES.memoryUsed), {
+      issueKey,
+      repoId: repo.id,
+      items: memory.used,
+    });
+    if (memory.used.length) {
+      logger.success(`Memory: ${memory.used.length} approved item(s) attached to the follow-up context.`);
+    } else {
+      logger.info('Memory: no approved memory items found for this issue/repo.');
+    }
+
     /* ---- followup context ---- */
     const instructions = await loadFollowupInstructions(config.projectRoot);
     const context = buildFollowupContextMarkdown({
@@ -930,17 +1119,20 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
       delta,
       git,
       instructions,
+      memoryContext: memory.markdown,
     });
     await writeText(fout(FOLLOWUP_FILES.context), context);
 
-    /* ---- Claude ---- */
+    /* ---- Claude (resume initial session + /compact when enabled) ---- */
+    logger.stage('running Claude');
     const claudeCfg = config.claude;
     const maxTurns = claudeCfg.maxTurns;
     logger.step(
       `Running Claude (${claudeCfg.bin}, model=${claudeCfg.model}, effort=${claudeCfg.effort}, ` +
-        `permissions=${claudeCfg.permissionMode}${maxTurns ? `, max-turns=${maxTurns}` : ''}) from worktree...`,
+        `permissions=${claudeCfg.permissionMode}${maxTurns ? `, max-turns=${maxTurns}` : ''}` +
+        `${resumePlan.enabled ? `, resume=${resumePlan.sessionId?.slice(0, 8)}…` : ''}) from worktree...`,
     );
-    const claude = await runClaude(context, {
+    const baseClaudeOpts = {
       bin: claudeCfg.bin,
       model: claudeCfg.model,
       effort: claudeCfg.effort,
@@ -948,7 +1140,39 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
       outputFormat: claudeCfg.outputFormat,
       maxTurns,
       cwd: wtPath,
-    });
+      onEvent: onClaudeEvent,
+    };
+    const claudeSessionMeta: FollowupClaudeSession = {
+      resumedClaudeSession: false,
+      compactBeforeFollowup: false,
+      initialSessionId: savedSession?.initialReviewSessionId ?? null,
+      usedSessionId: null,
+      resumeSource: resumePlan.source,
+    };
+
+    let claude: ClaudeRunResult;
+    if (resumePlan.enabled && resumePlan.sessionId) {
+      const resumed = await runClaude(withCompactDirective(context), {
+        ...baseClaudeOpts,
+        resumeSessionId: resumePlan.sessionId,
+      });
+      if (!shouldFallbackToStateless(resumed)) {
+        claude = resumed;
+        claudeSessionMeta.resumedClaudeSession = true;
+        claudeSessionMeta.compactBeforeFollowup = true;
+        claudeSessionMeta.usedSessionId = resumePlan.sessionId;
+        logger.success(`Resumed Claude session ${resumePlan.sessionId.slice(0, 8)}… (compacted first).`);
+      } else {
+        claudeSessionMeta.resumeError =
+          `Resumed run produced no usable output (exit ${resumed.exitCode}); ` +
+          `fell back to a stateless follow-up.`;
+        logger.warn(claudeSessionMeta.resumeError);
+        claude = await runClaude(context, baseClaudeOpts);
+      }
+    } else {
+      claude = await runClaude(context, baseClaudeOpts);
+    }
+
     await writeText(
       fout(FOLLOWUP_FILES.raw),
       claude.raw || JSON.stringify({ exitCode: claude.exitCode, stderr: claude.stderr }, null, 2),
@@ -957,13 +1181,14 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
 
     if (!claude.resultText.trim()) {
       const reason = `Claude CLI produced no usable output (exit ${claude.exitCode}).`;
-      await writeFollowupStop(reason, claude.stderr);
+      await writeFollowupStop(reason, claude.stderr, claudeSessionMeta);
       logger.error(reason);
       process.exitCode = 1;
       return;
     }
 
     /* ---- parse + render ---- */
+    logger.stage('writing outputs');
     const parsed = parseFollowupResult(claude.resultText);
     const renderCtx = { prFound, pr: details };
     if (parsed.ok && parsed.result) {
@@ -982,6 +1207,7 @@ async function cmdFollowup(issueKeyRaw: string, options: FollowupOptions): Promi
           currentHead: git.head,
           prId,
         },
+        claudeSession: claudeSessionMeta,
       };
       const md = renderFollowupMarkdown(issueKey, result, renderCtx);
       await writeJson(fout(FOLLOWUP_FILES.json), result);
@@ -1091,6 +1317,364 @@ async function cleanOlderThan(config: AppConfig, duration: string): Promise<void
 }
 
 /* ======================================================================== */
+/* Command: clone                                                           */
+/* ======================================================================== */
+
+interface CloneOptions {
+  /** commander --no-username sets this false (omit the username from the URL). */
+  username?: boolean;
+}
+
+async function cmdClone(repoId: string, options: CloneOptions): Promise<void> {
+  const config = loadAppConfig();
+  const repo = config.repos[repoId];
+  if (!repo) {
+    const available = Object.keys(config.repos).map((id) => `  - ${id}`).join('\n');
+    throw new RepoResolutionError(
+      `Repo "${repoId}" not found in config/repos.yml.\n\nAvailable repos:\n${available}`,
+    );
+  }
+
+  if (await pathExists(repo.absPath)) {
+    if (await pathExists(path.join(repo.absPath, '.git'))) {
+      logger.info(`${repoId}: already cloned at ${repo.path}. Nothing to do.`);
+      return;
+    }
+    throw new Error(
+      `${repo.absPath} exists but is not a git repo. Remove it first (GUI: Repos → Remove local), then clone.`,
+    );
+  }
+
+  const url = cloneUrlForRepo(config, repo, options.username);
+  await ensureDir(path.dirname(repo.absPath));
+
+  logger.stage('cloning repo');
+  // The URL contains no token (username only); the display line is safe to log.
+  logger.step(`git clone ${url} ${repo.path}`);
+  logger.info('Git Credential Manager will prompt for / pick up the password or token if needed.');
+
+  const res = await run('git', buildCloneArgs(url, repo.absPath), {
+    cwd: config.projectRoot,
+    onStdout: (chunk) => process.stdout.write(chunk),
+    onStderr: (chunk) => process.stdout.write(chunk),
+  });
+
+  if (res.code !== 0) {
+    logger.error(`Clone failed (exit ${res.code}).`);
+    process.exitCode = 1;
+    return;
+  }
+  logger.success(`${repoId}: cloned into ${repo.path}.`);
+}
+
+/* ======================================================================== */
+/* Commands: memory / learn (Review Memory Engine)                          */
+/* ======================================================================== */
+
+async function cmdMemoryInit(): Promise<void> {
+  const config = loadAppConfig();
+  const res = await initMemory(config);
+  for (const d of res.createdDirs) logger.success(`created: memory/${d}`);
+  for (const f of res.createdFiles) logger.success(`created: memory/${f}`);
+  if (!res.createdDirs.length && !res.createdFiles.length) {
+    logger.info('Memory structure already exists (nothing created).');
+  }
+  logger.success(`memory init done. Root: ${path.relative(process.cwd(), res.root) || '.'}`);
+}
+
+function printMemoryTable(items: MemoryIndexItem[]): void {
+  if (!items.length) {
+    logger.info('No memory items match.');
+    return;
+  }
+  const rows = items.map((it) => ({
+    id: it.id,
+    type: it.type,
+    status: it.status,
+    conf: it.confidence,
+    applies:
+      [
+        it.projects.length ? `proj:${it.projects.join(',')}` : '',
+        it.repos.length ? `repo:${it.repos.length === 1 ? it.repos[0] : `${it.repos.length} repos`}` : '',
+        it.tags.length ? `tags:${it.tags.slice(0, 4).join(',')}${it.tags.length > 4 ? '…' : ''}` : '',
+      ]
+        .filter(Boolean)
+        .join(' ') || 'global',
+    title: it.title,
+  }));
+  const w = {
+    id: Math.max(2, ...rows.map((r) => r.id.length)),
+    type: Math.max(4, ...rows.map((r) => r.type.length)),
+    status: Math.max(6, ...rows.map((r) => r.status.length)),
+    conf: Math.max(4, ...rows.map((r) => r.conf.length)),
+    applies: Math.max(10, ...rows.map((r) => r.applies.length)),
+  };
+  console.log(
+    `${pad('ID', w.id)}  ${pad('Type', w.type)}  ${pad('Status', w.status)}  ${pad('Conf', w.conf)}  ${pad('Applies to', w.applies)}  Title`,
+  );
+  for (const r of rows) {
+    console.log(
+      `${pad(r.id, w.id)}  ${pad(r.type, w.type)}  ${pad(r.status, w.status)}  ${pad(r.conf, w.conf)}  ${pad(r.applies, w.applies)}  ${r.title}`,
+    );
+  }
+}
+
+interface MemoryListOptions {
+  project?: string;
+  repo?: string;
+  type?: string;
+  status?: string;
+}
+
+async function cmdMemoryList(options: MemoryListOptions): Promise<void> {
+  const config = loadAppConfig();
+  const { items, warnings } = await scanMemory(config);
+  warnings.forEach((wrn) => logger.warn(wrn));
+  printMemoryTable(filterMemoryItems(items, options));
+}
+
+async function cmdMemoryShow(id: string): Promise<void> {
+  const config = loadAppConfig();
+  const item = await findMemoryItemById(config, id);
+  logger.info(`${item.path} [${item.type}/${item.status}/${item.confidence}]`);
+  console.log(await readText(item.absPath));
+}
+
+async function cmdMemorySearch(query: string): Promise<void> {
+  const config = loadAppConfig();
+  const { items } = await scanMemory(config);
+  printMemoryTable(searchMemoryItems(items, query));
+}
+
+async function cmdMemoryReindex(): Promise<void> {
+  const config = loadAppConfig();
+  const index = await reindexMemory(config);
+  logger.success(`memory reindex: ${index.items.length} item(s) indexed → memory/index.json`);
+}
+
+async function cmdMemoryApprove(id: string): Promise<void> {
+  const config = loadAppConfig();
+  const res = await approveProposal(config, id);
+  logger.success(`approved: ${res.id} → ${res.path} (now used in future reviews)`);
+}
+
+async function cmdMemoryReject(id: string): Promise<void> {
+  const config = loadAppConfig();
+  const res = await rejectProposal(config, id);
+  logger.success(`rejected: ${res.id} → ${res.path}`);
+}
+
+/** Approved id+title pairs handed to the curator so it does not duplicate. */
+async function listApprovedRefs(config: AppConfig): Promise<ExistingMemoryRef[]> {
+  const { items } = await scanMemory(config);
+  return items.filter((it) => it.status === 'approved').map((it) => ({ id: it.id, title: it.title }));
+}
+
+/** Run the memory-curator Claude call and save proposals to pending. */
+async function generateProposals(
+  config: AppConfig,
+  prompt: string,
+  rawOutFile: string,
+  source: { issueKey: string; repoId: string; outputPath?: string },
+): Promise<void> {
+  logger.stage('generating memory proposal');
+  const claudeCfg = config.claude;
+  logger.step(
+    `Running Claude (${claudeCfg.bin}, model=${claudeCfg.model}, effort=${claudeCfg.effort}) as memory curator...`,
+  );
+  const claude = await runClaude(prompt, {
+    bin: claudeCfg.bin,
+    model: claudeCfg.model,
+    effort: claudeCfg.effort,
+    permissionMode: claudeCfg.permissionMode,
+    outputFormat: claudeCfg.outputFormat,
+    // The curator answers from the provided digest — cap turns to keep the
+    // call bounded (one accidental tool call of grace, then the answer).
+    maxTurns: 2,
+    cwd: config.projectRoot,
+    onEvent: onClaudeEvent,
+  });
+  await ensureDir(path.dirname(rawOutFile));
+  await writeText(
+    rawOutFile,
+    claude.raw || JSON.stringify({ exitCode: claude.exitCode, stderr: claude.stderr }, null, 2),
+  );
+  if (claude.exitCode !== 0) logger.warn(`Claude CLI exited with code ${claude.exitCode}.`);
+  if (!claude.resultText.trim()) {
+    throw new Error(`Claude produced no usable output (exit ${claude.exitCode}). Raw saved to ${rawOutFile}.`);
+  }
+
+  const parsed = parseMemoryProposalResult(claude.resultText);
+  if (!parsed.ok || !parsed.result) {
+    throw new Error(
+      `Claude output was not a valid MemoryProposalResult (${parsed.error}). Raw saved to ${rawOutFile}.`,
+    );
+  }
+  if (!parsed.result.proposals.length) {
+    logger.info('No useful memory proposed (proposals: []). Nothing saved.');
+    return;
+  }
+
+  logger.stage('saving proposals');
+  const saved = await saveProposalsToPending(config, parsed.result.proposals, { source });
+  for (const s of saved) logger.success(`proposal saved: ${s.id} [${s.type}] → ${s.path}`);
+  logger.success(
+    `Memory propose complete: ${saved.length} PENDING proposal(s). ` +
+      `Approve/reject in the GUI (/memory) or via "nls-review memory approve <id>".`,
+  );
+}
+
+interface MemoryProposeOptions {
+  repo?: string;
+}
+
+async function cmdMemoryPropose(issueKeyRaw: string, options: MemoryProposeOptions): Promise<void> {
+  const config = loadAppConfig();
+  const { key: issueKey } = parseIssueKey(issueKeyRaw);
+  // Reading outputs only — prefix mapping must not block proposing.
+  const repo = resolveRepoSelection(config, issueKey, { repo: options.repo, allowUnmapped: true });
+  logger.info(`Memory propose: ${issueKey} -> repo ${repo.id}`);
+
+  const out = (name: string): string => outputFile(config.root.outputsDir, issueKey, repo.id, name);
+
+  logger.stage('collecting inputs');
+  const jiraDoc = await readJsonMaybe<{ normalized?: Record<string, unknown> }>(out(OUTPUT_FILES.jira));
+  const review = await readJsonMaybe(out(OUTPUT_FILES.reviewJson));
+  const reviewMd = await readTextMaybe(out(OUTPUT_FILES.reviewMd));
+  const followup = await readJsonMaybe(out(LATEST_FOLLOWUP_FILES.json));
+  const followupMd = await readTextMaybe(out(LATEST_FOLLOWUP_FILES.md));
+  if (!review && !followup) {
+    throw new Error(
+      `No review/follow-up outputs for ${issueKey} in ${repo.id}. Run "nls-review run ${issueKey}" first.`,
+    );
+  }
+
+  const promptText = await readText(path.resolve(config.projectRoot, 'prompts/memory-proposal.md')).catch(
+    () => DEFAULT_MEMORY_PROPOSAL_PROMPT,
+  );
+  const prompt = buildMemoryProposalPrompt(promptText, {
+    issueKey,
+    repoId: repo.id,
+    jira: (jiraDoc?.normalized ?? null) as never,
+    review,
+    reviewMd,
+    followup,
+    followupMd,
+    existingMemory: await listApprovedRefs(config),
+  });
+
+  await generateProposals(config, prompt, out(OUTPUT_FILES.memoryProposeRaw), {
+    issueKey,
+    repoId: repo.id,
+    outputPath: path
+      .relative(config.projectRoot, outputDir(config.root.outputsDir, issueKey, repo.id))
+      .split(path.sep)
+      .join('/'),
+  });
+}
+
+/** Best-effort diff of the bugfix branch vs the repo default base. */
+async function collectBugfixDiff(
+  repo: ResolvedRepo,
+  issueKey: string,
+): Promise<{ diff: BugfixDiffInfo | null; note?: string }> {
+  const git = (args: string[]) => run('git', args, { cwd: repo.absPath });
+  const ls = await git(['branch', '-r', '--list', `*${issueKey}*`]);
+  const branch = ls.stdout
+    .split('\n')
+    .map((s) => s.trim())
+    .filter((s) => s && !s.includes('->'))[0];
+  if (!branch) return { diff: null, note: `no remote branch matching *${issueKey}* (try: nls-review sync --repo ${repo.id})` };
+
+  const base = repo.defaultBaseBranch;
+  const names = await git(['diff', '--name-only', `${base}...${branch}`]);
+  const diff = await git(['diff', `${base}...${branch}`]);
+  if (diff.code !== 0) return { diff: null, note: `git diff ${base}...${branch} failed` };
+  return {
+    diff: {
+      branch,
+      baseBranch: base,
+      changedFiles: names.stdout.split('\n').map((s) => s.trim()).filter(Boolean),
+      diff: diff.stdout,
+    },
+  };
+}
+
+interface LearnBugfixOptions {
+  repo?: string;
+}
+
+async function cmdLearnBugfix(issueKeyRaw: string, options: LearnBugfixOptions): Promise<void> {
+  const config = loadAppConfig();
+  const { key: issueKey } = parseIssueKey(issueKeyRaw);
+  const repo = resolveRepoSelection(config, issueKey, { repo: options.repo, allowUnmapped: true });
+  logger.info(`Bugfix learning: ${issueKey} -> repo ${repo.id}`);
+  validateRunCredentials(config);
+
+  logger.stage('fetching Jira');
+  logger.step('Fetching bugfix Jira issue...');
+  const jiraClient = new JiraClient(config.jira);
+  const rawIssue = await jiraClient.getIssue(issueKey, config.jiraFields);
+  const jira = normalizeIssue(rawIssue, config.jira.baseUrl, config.jiraFields.customFields);
+  logger.success(`Jira: ${jira.summary || '(no summary)'} [${jira.status}]`);
+
+  // Related previous reviews: this issue's own outputs + linked issues' outputs.
+  logger.stage('collecting related reviews');
+  const relatedKeys = [...new Set([issueKey, ...jira.links.map((l) => l.key).filter(Boolean)])];
+  const related: RelatedReviewRef[] = [];
+  for (const key of relatedKeys) {
+    const review = await readJsonMaybe(outputFile(config.root.outputsDir, key, repo.id, OUTPUT_FILES.reviewJson));
+    const followup = await readJsonMaybe(
+      outputFile(config.root.outputsDir, key, repo.id, LATEST_FOLLOWUP_FILES.json),
+    );
+    if (review || followup) related.push({ issueKey: key, review, followup });
+  }
+  logger.info(
+    related.length
+      ? `Related outputs: ${related.map((r) => r.issueKey).join(', ')}`
+      : 'No related review outputs found (best-effort analysis).',
+  );
+
+  logger.stage('collecting bugfix diff');
+  let diffInfo: BugfixDiffInfo | null = null;
+  let diffNote: string | undefined;
+  if (await pathExists(repo.absPath)) {
+    const res = await collectBugfixDiff(repo, issueKey);
+    diffInfo = res.diff;
+    diffNote = res.note;
+    if (diffInfo) logger.success(`Bugfix diff: ${diffInfo.branch} vs ${diffInfo.baseBranch} (${diffInfo.changedFiles.length} files).`);
+    else logger.warn(`Bugfix diff unavailable: ${diffNote}`);
+  } else {
+    diffNote = `repo not cloned at ${repo.path}`;
+    logger.warn(`Repo not cloned; skipping diff collection.`);
+  }
+
+  const promptText = await readText(path.resolve(config.projectRoot, 'prompts/bugfix-learning.md')).catch(
+    () => DEFAULT_BUGFIX_LEARNING_PROMPT,
+  );
+  const prompt = buildBugfixLearningPrompt(promptText, {
+    issueKey,
+    repoId: repo.id,
+    jira,
+    related,
+    diff: diffInfo,
+    diffNote,
+    existingMemory: await listApprovedRefs(config),
+  });
+
+  await generateProposals(
+    config,
+    prompt,
+    outputFile(config.root.outputsDir, issueKey, repo.id, OUTPUT_FILES.bugfixLearningRaw),
+    { issueKey, repoId: repo.id },
+  );
+}
+
+const DEFAULT_MEMORY_PROPOSAL_PROMPT = `Ты Review Memory Curator. Не ревьюй код заново — предложи полезные memory proposals по итогам review/follow-up. Только с evidence, без очевидностей, без переобобщения. Если полезной памяти нет — верни {"proposals": []}. Ответ: строго JSON по схеме MemoryProposalResult.`;
+
+const DEFAULT_BUGFIX_LEARNING_PROMPT = `Ты Review Bugfix Learning Agent. Разбери багфикс после процесса review: что сломалось, что было пропущено, почему, какое правило памяти добавить и как его не переобобщить. Если полезного урока нет — верни {"proposals": []}. Ответ: строго JSON по схеме MemoryProposalResult.`;
+
+/* ======================================================================== */
 /* Program                                                                  */
 /* ======================================================================== */
 
@@ -1105,7 +1689,8 @@ function runAction(fn: (...args: any[]) => Promise<void>) {
         e instanceof ConfigError ||
         e instanceof LockHeldError ||
         e instanceof MultiplePullRequestsError ||
-        e instanceof PreviousReviewNotFoundError;
+        e instanceof PreviousReviewNotFoundError ||
+        e instanceof MemoryError;
       logger.error(e.message);
       if (!known && process.env.NLS_DEBUG) {
         console.error(e.stack);
@@ -1147,6 +1732,7 @@ function buildProgram(): Command {
     .description('Collect context and run the review agent for a Jira issue.')
     .option('--repo <repoId>', 'target repository id (required when a prefix maps to several repos)')
     .option('--allow-unmapped', 'allow a repo whose jiraPrefixes does not include this prefix')
+    .option('--no-sync', 'skip the automatic git fetch --all --prune before the review')
     .action(runAction((issueKey: string, opts: RunOptions) => cmdRun(issueKey, opts)));
 
   program
@@ -1159,6 +1745,10 @@ function buildProgram(): Command {
       'path to a previous review.json/review.md (default: outputs/<issue>/<repo>/review.json)',
     )
     .option('--from-head <hash>', 'previous HEAD to diff from (overrides the previous review head)')
+    .option('--no-sync', 'skip the automatic git fetch --all --prune before the follow-up')
+    .option('--resume', 'resume the initial review Claude session (default when one is saved)')
+    .option('--no-resume', 'do not resume; run a stateless follow-up')
+    .option('--resume-session <id>', 'resume this Claude session id instead of the saved one')
     .action(runAction((issueKey: string, opts: FollowupOptions) => cmdFollowup(issueKey, opts)));
 
   program
@@ -1167,6 +1757,62 @@ function buildProgram(): Command {
     .option('--repo <repoId>', 'target repository id')
     .option('--older-than <duration>', 'remove worktrees older than e.g. 14d, 24h')
     .action(runAction((issueKey: string | undefined, opts: CleanOptions) => cmdClean(issueKey, opts)));
+
+  program
+    .command('clone <repoId>')
+    .description('git clone a configured repo into ./repos/<repoId> (no token in the URL).')
+    .option('--no-username', 'omit the Bitbucket username from the clone URL')
+    .action(runAction((repoId: string, opts: CloneOptions) => cmdClone(repoId, opts)));
+
+  const memory = program
+    .command('memory')
+    .description('Review Memory Engine: local, human-approved memory used as review context.');
+  memory
+    .command('init')
+    .description('Create the memory/ folder structure, seed principles and index.json.')
+    .action(runAction(cmdMemoryInit));
+  memory
+    .command('list')
+    .description('List memory items (from a live scan of memory/).')
+    .option('--project <key>', 'filter by Jira project prefix (e.g. SC)')
+    .option('--repo <repoId>', 'filter by repo id')
+    .option('--type <type>', 'filter by memory type (lesson, project_rule, ...)')
+    .option('--status <status>', 'filter by status (approved, proposed, rejected, deprecated)')
+    .action(runAction((opts: MemoryListOptions) => cmdMemoryList(opts)));
+  memory
+    .command('show <id>')
+    .description('Print one memory item (frontmatter + markdown).')
+    .action(runAction((id: string) => cmdMemoryShow(id)));
+  memory
+    .command('search <query>')
+    .description('Search memory by id / title / tags / body.')
+    .action(runAction((query: string) => cmdMemorySearch(query)));
+  memory
+    .command('reindex')
+    .description('Rebuild memory/index.json from the markdown files.')
+    .action(runAction(cmdMemoryReindex));
+  memory
+    .command('propose <issueKey>')
+    .description('Ask Claude to draft memory proposals from an issue\'s review/follow-up outputs (saved as PENDING).')
+    .option('--repo <repoId>', 'target repository id')
+    .action(runAction((issueKey: string, opts: MemoryProposeOptions) => cmdMemoryPropose(issueKey, opts)));
+  memory
+    .command('approve <proposalId>')
+    .description('Approve a pending proposal (moves it into approved memory + reindex).')
+    .action(runAction((id: string) => cmdMemoryApprove(id)));
+  memory
+    .command('reject <proposalId>')
+    .description('Reject a pending proposal (moves it to proposals/rejected).')
+    .action(runAction((id: string) => cmdMemoryReject(id)));
+
+  const learn = program
+    .command('learn')
+    .description('Learn from post-review outcomes.');
+  learn
+    .command('bugfix <issueKey>')
+    .description('Analyze a bugfix issue (Jira + related reviews + branch diff) and draft memory proposals.')
+    .option('--repo <repoId>', 'target repository id')
+    .action(runAction((issueKey: string, opts: LearnBugfixOptions) => cmdLearnBugfix(issueKey, opts)));
 
   return program;
 }

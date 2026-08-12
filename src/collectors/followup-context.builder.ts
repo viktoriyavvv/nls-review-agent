@@ -21,10 +21,12 @@ export interface BuildFollowupContextParams {
   git: GitMetadata;
   /** Follow-up review instructions (prompt + output format). */
   instructions: string;
+  /** Rendered `## Memory Context` block (approved local memory), if any. */
+  memoryContext?: string;
 }
 
 export function buildFollowupContextMarkdown(params: BuildFollowupContextParams): string {
-  const { issueKey, jira, pr, previous, comments, commentsError, delta, git, instructions } = params;
+  const { issueKey, jira, pr, previous, comments, commentsError, delta, git, instructions, memoryContext } = params;
   const lines: string[] = [];
 
   lines.push('# Follow-up review context', '');
@@ -150,6 +152,11 @@ export function buildFollowupContextMarkdown(params: BuildFollowupContextParams)
   if (git.diffError) lines.push(`> ${git.diffError}`, '');
   lines.push('```patch', capDiff(git.diff, MAX_FULL_DIFF_CHARS) || '(no diff)', '```');
   lines.push('');
+
+  /* -------------------------- Memory Context -------------------------- */
+  if (memoryContext && memoryContext.trim()) {
+    lines.push(memoryContext.trim(), '');
+  }
 
   /* -------------------------- Instructions -------------------------- */
   lines.push('## Instructions', '');

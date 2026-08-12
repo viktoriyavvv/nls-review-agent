@@ -48,7 +48,22 @@ export const OUTPUT_FILES = {
   reviewJson: 'review.json',
   reviewMd: 'review.md',
   error: 'error.md',
+  claudeSession: 'claude-session.json',
+  memoryContext: 'memory-context.md',
+  memoryUsed: 'memory-used.json',
+  memoryProposeRaw: 'memory-propose.raw.json',
+  bugfixLearningRaw: 'bugfix-learning.raw.json',
 } as const;
+
+/**
+ * True if `child` is the same as, or nested under, `root`. Both should be
+ * absolute. Used as a containment check for path-traversal defence (outputs
+ * sandbox) and for confirming a repo folder lives under reposDir before delete.
+ */
+export function isInside(root: string, child: string): boolean {
+  const rel = path.relative(root, child);
+  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel));
+}
 
 /* ----------------------------- follow-up ----------------------------- */
 
@@ -76,6 +91,8 @@ export const FOLLOWUP_FILES = {
   json: 'followup.json',
   md: 'followup.md',
   error: 'followup-error.md',
+  memoryContext: 'memory-context.md',
+  memoryUsed: 'memory-used.json',
 } as const;
 
 /** Convenience "latest" pointers written at the issue+repo root (overwritten). */

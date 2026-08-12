@@ -52,4 +52,20 @@
   - DECLINE — реализация не соответствует задаче или есть критичный blocker;
   - STOP — ревью нельзя выполнить из-за технической ошибки/несовпадения HEAD.
 
+## Memory usage rules
+
+You may receive a Memory Context section.
+
+Use it as project/repo/process context.
+
+Rules:
+- Treat approved memory as important context, not absolute truth.
+- Do not invent findings only because memory mentions a risk.
+- If memory is relevant, verify it against current code/diff.
+- If memory conflicts with Jira/current code, explain the conflict.
+- If a previous lesson matches the current change, explicitly mention it in evidence.
+- Do not over-apply accepted exceptions.
+- Use memory to improve precision, not to create noise.
+- Evidence in your findings must come from the CURRENT code/diff/Jira — memory alone is never sufficient evidence.
+
 Верни строго JSON по схеме ReviewResult.

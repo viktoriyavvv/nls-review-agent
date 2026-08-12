@@ -31,6 +31,8 @@ export const ReviewResultSchema = z.object({
   risks: z.array(RiskSchema).default([]),
   questionsForDeveloper: z.array(z.string()).default([]),
   bitbucketComment: z.string().default(''),
+  /** Claude session id captured from the run (set by the CLI, not the model). */
+  claudeSessionId: z.string().optional(),
 });
 
 export type ReviewVerdict = z.infer<typeof ReviewVerdictSchema>;

@@ -162,12 +162,85 @@ export class JiraClient {
     return histories;
   }
 
-  async searchIssuesByJql(jql: string, maxResults = 50): Promise<any[]> {
-    const res = await this.http.get(this.api('/search'), {
-      params: { jql, maxResults },
-    });
-    return res.data?.issues ?? [];
+  /**
+   * Run a JQL search and return a raw page envelope (total/startAt/maxResults +
+   * issues) so callers can warn on truncation. `fields` limits the payload.
+   *
+   * Jira Cloud (apiVersion "3") retired the classic `/search` endpoint
+   * (CHANGE-2046); it now uses `/search/jql` with token pagination and no exact
+   * total, so the count is fetched separately (best-effort). Jira Server / Data
+   * Center (apiVersion "2") keeps the classic `/search` with startAt + total.
+   */
+  async searchIssuesByJql(
+    jql: string,
+    opts: JqlSearchOpts = {},
+  ): Promise<JiraSearchRaw> {
+    return this.cfg.apiVersion === '3'
+      ? this.searchCloud(jql, opts)
+      : this.searchClassic(jql, opts);
   }
+
+  private async searchClassic(jql: string, opts: JqlSearchOpts): Promise<JiraSearchRaw> {
+    const res = await this.http.get(this.api('/search'), {
+      params: {
+        jql,
+        maxResults: opts.maxResults ?? 50,
+        startAt: opts.startAt ?? 0,
+        ...(opts.fields && opts.fields.length ? { fields: opts.fields.join(',') } : {}),
+      },
+    });
+    return {
+      total: res.data?.total ?? 0,
+      startAt: res.data?.startAt ?? 0,
+      maxResults: res.data?.maxResults ?? opts.maxResults ?? 50,
+      issues: res.data?.issues ?? [],
+    };
+  }
+
+  private async searchCloud(jql: string, opts: JqlSearchOpts): Promise<JiraSearchRaw> {
+    const maxResults = opts.maxResults ?? 50;
+    const res = await this.http.get(this.api('/search/jql'), {
+      params: {
+        jql,
+        maxResults,
+        ...(opts.fields && opts.fields.length ? { fields: opts.fields.join(',') } : {}),
+        ...(opts.nextPageToken ? { nextPageToken: opts.nextPageToken } : {}),
+      },
+    });
+    const issues = res.data?.issues ?? [];
+    const isLast = res.data?.isLast ?? issues.length < maxResults;
+    const total = await this.approximateCount(jql, issues.length);
+    return { total, startAt: 0, maxResults, issues, isLast, nextPageToken: res.data?.nextPageToken };
+  }
+
+  /** Best-effort approximate match count (the new search API omits totals). */
+  private async approximateCount(jql: string, fallback: number): Promise<number> {
+    try {
+      const res = await this.http.post(this.api('/search/approximate-count'), { jql });
+      const n = res.data?.count;
+      return typeof n === 'number' ? n : fallback;
+    } catch {
+      return fallback;
+    }
+  }
+}
+
+export interface JqlSearchOpts {
+  maxResults?: number;
+  startAt?: number;
+  fields?: string[];
+  nextPageToken?: string;
+}
+
+/** Raw page envelope from a Jira JQL search. */
+export interface JiraSearchRaw {
+  total: number;
+  startAt: number;
+  maxResults: number;
+  issues: any[];
+  /** Cloud token-pagination hints (absent on classic Server/DC search). */
+  isLast?: boolean;
+  nextPageToken?: string;
 }
 
 /** Reduce a raw Jira issue payload to the fields we care about for review. */

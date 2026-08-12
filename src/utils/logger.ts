@@ -13,6 +13,10 @@ export const logger = {
   step(msg: string): void {
     console.log(`[step]  ${msg}`);
   },
+  /** Marks a pipeline stage transition (parsed by the GUI job runner). */
+  stage(name: string): void {
+    console.log(`[stage] ${name}`);
+  },
   success(msg: string): void {
     console.log(`[ok]    ${msg}`);
   },

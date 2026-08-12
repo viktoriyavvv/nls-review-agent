@@ -137,6 +137,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       worktreesDir: resolveDir(reposFile.root.worktreesDir),
       outputsDir: resolveDir(reposFile.root.outputsDir),
       locksDir: resolveDir(reposFile.root.locksDir),
+      memoryDir: resolveDir(reposFile.root.memoryDir),
     },
     jira: reposFile.jira,
     bitbucket: reposFile.bitbucket,

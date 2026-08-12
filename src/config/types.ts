@@ -13,6 +13,8 @@ export const RootConfigSchema = z.object({
   worktreesDir: z.string().default('./worktrees'),
   outputsDir: z.string().default('./outputs'),
   locksDir: z.string().default('./locks'),
+  /** Review Memory Engine storage (markdown files + index.json). */
+  memoryDir: z.string().default('./memory'),
 });
 
 export const JiraConfigSchema = z.object({
@@ -142,6 +144,8 @@ export interface AppConfig {
     worktreesDir: string;
     outputsDir: string;
     locksDir: string;
+    /** Optional in hand-built test configs; loadConfig always resolves it. */
+    memoryDir?: string;
   };
   jira: JiraConfig;
   bitbucket: BitbucketConfig;

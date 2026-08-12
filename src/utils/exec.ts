@@ -13,6 +13,10 @@ export interface RunOptions {
   env?: NodeJS.ProcessEnv;
   /** Run through the OS shell (needed on Windows for .cmd/.bat binaries). */
   shell?: boolean;
+  /** Called with each stdout chunk as it arrives (in addition to buffering). */
+  onStdout?: (chunk: string) => void;
+  /** Called with each stderr chunk as it arrives (in addition to buffering). */
+  onStderr?: (chunk: string) => void;
 }
 
 /**
@@ -33,8 +37,16 @@ export function run(file: string, args: string[], options: RunOptions = {}): Pro
     const stdout: Buffer[] = [];
     const stderr: Buffer[] = [];
 
-    child.stdout?.on('data', (d: Buffer) => stdout.push(Buffer.from(d)));
-    child.stderr?.on('data', (d: Buffer) => stderr.push(Buffer.from(d)));
+    child.stdout?.on('data', (d: Buffer) => {
+      const b = Buffer.from(d);
+      stdout.push(b);
+      if (options.onStdout) options.onStdout(b.toString('utf8'));
+    });
+    child.stderr?.on('data', (d: Buffer) => {
+      const b = Buffer.from(d);
+      stderr.push(b);
+      if (options.onStderr) options.onStderr(b.toString('utf8'));
+    });
 
     child.on('error', (err) => reject(err));
     child.on('close', (code) => {
