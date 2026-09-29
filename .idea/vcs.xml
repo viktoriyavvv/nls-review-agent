@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="VcsDirectoryMappings">
+    <mapping directory="" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/repos/crm.meganet.kz-front-copy" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/repos/frontend-billing.netcore.kz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/repos/frontend-cloud.nls.kz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/repos/frontend-kenes.nls.kz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/repos/frontend-support-center.netcore.kz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/repos/frontend-task.netcore.kz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/repos/frontend_video.nls.kz" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/repos/kenes-conference" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/repos/meganet.kz-2023-front" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/repos/tech-app-2.0" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/crm.meganet.kz-front-copy/CRMMEG-2568" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/crm.meganet.kz-front-copy/CRMMEG-3173" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/crm.meganet.kz-front-copy/CRMMEG-3188" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/crm.meganet.kz-front-copy/CRMMEG-3233" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-billing.netcore.kz/BILL-477" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-billing.netcore.kz/BILL-713" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-cloud.nls.kz/WEBSITE-316" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-kenes.nls.kz/KEN-471" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-kenes.nls.kz/KEN-83" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-2241" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3160" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3361" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3502" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3639" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3670" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3683" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3711" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3944" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3958" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3976" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3980" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-3991" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-4014" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-4037" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-4050" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-4069" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-4093" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-4148" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-4151" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-4232" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-support-center.netcore.kz/SC-4234" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-task.netcore.kz/TM-247" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-task.netcore.kz/TM-259" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-task.netcore.kz/TM-277" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-task.netcore.kz/TM-282" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend-task.netcore.kz/TM-284" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend_video.nls.kz/VPS-178" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/frontend_video.nls.kz/VPS-71" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/kenes-conference/KEN-408" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/meganet.kz-2023-front/WEBSITE-506" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/meganet.kz-2023-front/WEBSITE-528" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/worktrees/tech-app-2.0/TA-794" vcs="Git" />
+  </component>
+</project>
